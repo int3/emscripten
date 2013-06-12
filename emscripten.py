@@ -513,7 +513,7 @@ function asmPrintFloat(x, y) {
   Module.print('float ' + x + ',' + y);// + ' ' + new Error().stack);
 }
 // EMSCRIPTEN_START_ASM
-var asm = (function(global, env, buffer) {
+function asmModule(global, env, buffer) {
   'use asm';
   var HEAP8 = new global.Int8Array(buffer);
   var HEAP16 = new global.Int16Array(buffer);
@@ -564,9 +564,9 @@ var asm = (function(global, env, buffer) {
   %s
 
   return %s;
-})
+}
 // EMSCRIPTEN_END_ASM
-(%s, %s, buffer);
+var asm = asmModule(%s, %s, buffer);
 %s;
 Runtime.stackAlloc = function(size) { return asm['stackAlloc'](size) };
 Runtime.stackSave = function() { return asm['stackSave']() };

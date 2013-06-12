@@ -586,11 +586,7 @@ var DYNAMIC_BASE = 0, DYNAMICTOP = 0; // dynamic area handled by sbrk
 #if USE_TYPED_ARRAYS
 function enlargeMemory() {
 #if ALLOW_MEMORY_GROWTH == 0
-#if ASM_JS == 0
   abort('Cannot enlarge memory arrays. Either (1) compile with -s TOTAL_MEMORY=X with X higher than the current value, (2) compile with ALLOW_MEMORY_GROWTH which adjusts the size at runtime but prevents some optimizations, or (3) set Module.TOTAL_MEMORY before the program runs.');
-#else
-  abort('Cannot enlarge memory arrays in asm.js. Either (1) compile with -s TOTAL_MEMORY=X with X higher than the current value, or (2) set Module.TOTAL_MEMORY before the program runs.');
-#endif
 #else
   // TOTAL_MEMORY is the current size of the actual array, and DYNAMICTOP is the new top.
 #if ASSERTIONS
@@ -602,6 +598,7 @@ function enlargeMemory() {
     TOTAL_MEMORY = alignMemoryPage(2*TOTAL_MEMORY);
   }
   assert(TOTAL_MEMORY <= Math.pow(2, 30)); // 2^30==1GB is a practical maximum - 2^31 is already close to possible negative numbers etc.
+#if ASM_JS == 0
 #if USE_TYPED_ARRAYS == 1
   var oldIHEAP = IHEAP;
   Module['HEAP'] = Module['IHEAP'] = HEAP = IHEAP = new Int32Array(TOTAL_MEMORY);
@@ -625,6 +622,9 @@ function enlargeMemory() {
   Module['HEAPF32'] = HEAPF32 = new Float32Array(buffer);
   Module['HEAPF64'] = HEAPF64 = new Float64Array(buffer);
   HEAP8.set(oldHEAP8);
+#endif
+#else // ASM_JS == 1
+  abort('NYI');
 #endif
 #endif
 }
