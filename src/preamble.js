@@ -624,7 +624,10 @@ function enlargeMemory() {
   HEAP8.set(oldHEAP8);
 #endif
 #else // ASM_JS == 1
-  abort('NYI');
+  asm.saveGlobalState(DYNAMICTOP);
+  buffer = new ArrayBuffer(TOTAL_MEMORY);
+  asm = asmModule(asmGlobal, asmEnv, buffer);
+  asm.restoreGlobalState(DYNAMICTOP);
 #endif
 #endif
 }

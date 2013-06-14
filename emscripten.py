@@ -11,6 +11,7 @@ headers, for the libc implementation in JS).
 
 import os, sys, json, optparse, subprocess, re, time, multiprocessing, functools
 
+from tools import shared
 from tools import jsrun, cache as cache_module, tempfiles
 from tools.response_file import read_response_file
 
@@ -423,7 +424,8 @@ def emscript(infile, settings, outfile, libraries=[], compiler_engine=None,
        forwarded_json['Functions']['libraryFunctions'].get('llvm_ctlz_i32'):
       basic_vars += ['cttz_i8', 'ctlz_i8']
 
-    asm_runtime_funcs = ['stackAlloc', 'stackSave', 'stackRestore', 'setThrew'] + ['setTempRet%d' % i for i in range(10)]
+    asm_runtime_funcs = ['stackAlloc', 'stackSave', 'stackRestore', 'setThrew',
+        'saveGlobalState', 'restoreGlobalState'] + ['setTempRet%d' % i for i in range(10)]
     # function tables
     def asm_coerce(value, sig):
       if sig == 'v': return value
@@ -502,7 +504,37 @@ function invoke_%s(%s) {
 
     # finalize
 
+
     if DEBUG: print >> sys.stderr, 'asm text sizes', map(len, funcs_js), len(asm_setup), len(asm_global_vars), len(asm_global_funcs), len(pre_tables), len('\n'.join(function_tables_impls)), len(function_tables_defs.replace('\n', '\n  ')), len(exports), len(the_global), len(sending), len(receiving)
+
+    internal_global_ints = ['__THREW__', 'threwValue', 'setjmpId', 'undef',
+      'tempInt', 'tempBigInt', 'tempBigIntP', 'tempBigIntS',  'tempBigIntI',
+      'tempBigIntD', 'tempValue']
+
+    internal_global_doubles = ['tempBigIntR', 'tempDouble']
+
+    def globalStateFunctions():
+      int_vars = basic_vars + internal_global_ints + ["tempRet%d" % i for i in xrange(10)]
+      return '''
+        function saveGlobalState(DYNAMICTOP) {
+          DYNAMICTOP = DYNAMICTOP | 0;
+        ''' + \
+        '\n'.join("HEAP32[DYNAMICTOP+%d>>2] = %s;" % (i, v)
+                  for i,v in enumerate(int_vars)) + \
+        '\n'.join("HEAPF64[DYNAMICTOP+%d>>3] = %s;" % (i + len(int_vars) * 4, v)
+                    for i,v in enumerate(internal_global_doubles)) + \
+        '''
+        }
+        function restoreGlobalState(DYNAMICTOP) {
+          DYNAMICTOP = DYNAMICTOP | 0;
+        ''' + \
+        '\n'.join("%s = HEAP32[DYNAMICTOP+%d>>2]|0;" % (v, i)
+                  for i,v in enumerate(int_vars)) + \
+        '\n'.join("%s = +HEAPF64[DYNAMICTOP+%d>>3];" % (v, i + len(int_vars) * 4)
+                  for i,v in enumerate(internal_global_doubles)) + \
+        '''
+        }
+        '''
 
     funcs_js = ['''
 %s
@@ -524,11 +556,8 @@ function asmModule(global, env, buffer) {
   var HEAPF32 = new global.Float32Array(buffer);
   var HEAPF64 = new global.Float64Array(buffer);
 ''' % (asm_setup,) + '\n' + asm_global_vars + '''
-  var __THREW__ = 0;
-  var threwValue = 0;
-  var setjmpId = 0;
-  var undef = 0;
-  var tempInt = 0, tempBigInt = 0, tempBigIntP = 0, tempBigIntS = 0, tempBigIntR = 0.0, tempBigIntI = 0, tempBigIntD = 0, tempValue = 0, tempDouble = 0.0;
+  var ''' + ', '.join("%s = 0" % name for name in internal_global_ints) + ''';
+  var ''' + ', '.join("%s = 0.0" % name for name in internal_global_doubles) + ''';
 ''' + ''.join(['''
   var tempRet%d = 0;''' % i for i in range(10)]) + '\n' + asm_global_funcs + '''
 // EMSCRIPTEN_START_FUNCS
@@ -555,7 +584,8 @@ function asmModule(global, env, buffer) {
       threwValue = value;
     }
   }
-''' + ''.join(['''
+  ''' + (globalStateFunctions() if shared.Settings.ALLOW_MEMORY_GROWTH else '') + \
+  ''.join(['''
   function setTempRet%d(value) {
     value = value|0;
     tempRet%d = value;
@@ -566,7 +596,9 @@ function asmModule(global, env, buffer) {
   return %s;
 }
 // EMSCRIPTEN_END_ASM
-var asm = asmModule(%s, %s, buffer);
+var asmGlobal = %s;
+var asmEnv = %s;
+var asm = asmModule(asmGlobal, asmEnv, buffer);
 %s;
 Runtime.stackAlloc = function(size) { return asm['stackAlloc'](size) };
 Runtime.stackSave = function() { return asm['stackSave']() };
